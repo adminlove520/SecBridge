@@ -11,6 +11,7 @@ from typing import Optional
 from utils.git_manager import GitManager
 from utils.discord_sender import DiscordPoster
 from utils.db_manager import DBManager
+from utils.reporter import Reporter
 from scripts.content_formatter import extract_info_from_path
 from dotenv import load_dotenv
 
@@ -64,9 +65,12 @@ async def main():
     def on_post_success(data):
         rel_path = os.path.relpath(data['content_path'], repo_path)
         db_manager.mark_file_processed(rel_path)
+        reporter.record_success()
         logging.info(f"✨ 数据库已更新: {rel_path} 标记为已处理")
 
     poster = None
+    reporter = Reporter(repo_path, db_manager)
+    
     if not args.dry_run:
         # 传入回调函数
         poster = DiscordPoster(token, channel_id, config, success_callback=on_post_success)
@@ -103,6 +107,8 @@ async def main():
                     if not db_manager.is_file_processed(rel_path):
                         files_to_process.append(file_path)
                         new_files_count += 1
+                    else:
+                        reporter.record_skip()
                 
                 logging.info(f"其中 {new_files_count} 个为新文件(未发送过)")
 
@@ -124,6 +130,8 @@ async def main():
                             rel_path = os.path.relpath(f, repo_path)
                             if not db_manager.is_file_processed(rel_path):
                                 files_to_process.append(f)
+                            else:
+                                reporter.record_skip()
                         
                         db_manager.set_state('last_commit', new_sha)
                     else:
@@ -143,6 +151,7 @@ async def main():
                     log_info['content_path'] = os.path.relpath(info['content_path'], repo_path)
                     log_info['attachments'] = [os.path.relpath(fp, repo_path) for fp in info['attachments']]
                     logging.info(f"[DRY RUN] 发送内容: {json.dumps(log_info, ensure_ascii=False)}")
+                    reporter.record_success() # Dry run counts as success
                 else:
                     await poster.add_to_queue(info)
 
@@ -150,6 +159,14 @@ async def main():
                 if poster and not args.dry_run:
                     logging.info("等待队列任务完成...")
                     await poster.queue.join()
+                
+                # --- 生成报告 (在循环结束后，或单次运行结束前) ---
+                try:
+                    reporter.scan_orphans()
+                    reporter.generate_report()
+                except Exception as e:
+                    logging.error(f"生成报告失败: {e}")
+                    
                 break
             
             wait_time = config.get('app', {}).get('loop_interval', 300)

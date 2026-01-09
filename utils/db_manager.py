@@ -54,6 +54,15 @@ class DBManager:
         finally:
             conn.close()
 
+    def get_all_processed_files(self) -> list:
+        """获取所有已处理文件的列表"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM processed_files')
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+
     def get_state(self, key: str) -> Optional[str]:
         """获取状态值"""
         conn = sqlite3.connect(self.db_path)
