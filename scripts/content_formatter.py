@@ -60,6 +60,42 @@ def extract_info_from_path(file_path, repo_root):
     if year_tag != "Unknown" and not final_title.startswith(year_tag):
         final_title = f"{year_tag}-{final_title}"
 
+    # --- 提取漏洞复现/摘要内容 ---
+    content_body = "New PoC Alert!" # 默认值
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            full_text = f.read()
+            
+        # 策略 1: 匹配 "漏洞复现" / "POC" / "EXP" 章节
+        # 匹配 # 漏洞复现 或 **漏洞复现** (忽略大小写)
+        # (?:^|\n) 确保匹配行首
+        pattern = re.compile(r'(?:^|\n)(?:#+\s*|\*\*)(漏洞复现|POC|EXP|漏洞POC)(?:\*\*|:)?.*?\n(.*?)(?:(?=\n#)|$)', re.IGNORECASE | re.DOTALL)
+        match = pattern.search(full_text)
+        
+        extracted_text = ""
+        if match:
+            extracted_text = match.group(2).strip()
+        else:
+            # 策略 2: 如果没找到特定标题，尝试跳过前面可能的元数据/无关信息
+            # 简单的取前 500 字符作为预览
+            # 找第一个代码块之前的内容？或者直接截断
+            if len(full_text) > 200:
+                extracted_text = full_text[:500]
+            else:
+                extracted_text = full_text
+
+        if extracted_text:
+            # 限制长度，防止 Discord 报错 (Content limit 2000, 留点余量给标题)
+            max_len = 1800
+            if len(extracted_text) > max_len:
+                extracted_text = extracted_text[:max_len] + "\n... (详见附件)"
+            content_body = extracted_text
+            
+    except Exception as e:
+        print(f"Error reading content for {file_path}: {e}")
+
+
+
     # --- 简化标签提取: 直接使用目录名/标题 (用户建议) ---
     tags = [year_tag] if year_tag != "Unknown" else []
     
@@ -96,5 +132,6 @@ def extract_info_from_path(file_path, repo_root):
         "title": final_title,
         "tags": tags,
         "content_path": file_path,
+        "content_body": content_body,
         "attachments": attachments
     }

@@ -78,7 +78,9 @@ class Reporter:
         
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(f"# SecPoster 运行报告\n\n")
-            f.write(f"**生成时间**: {os.popen('date /t').read().strip()} {os.popen('time /t').read().strip()}\n\n")
+            from datetime import datetime
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"**生成时间**: {current_time}\n\n")
             
             f.write("## 1. 运行摘要\n\n")
             f.write(f"- ✅ **成功发送**: {self.success_count}\n")

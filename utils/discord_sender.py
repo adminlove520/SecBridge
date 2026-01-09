@@ -113,7 +113,7 @@ class DiscordPoster(discord.Client):
                 if os.path.exists(file_path):
                     files.append(discord.File(file_path))
             
-            content = f"New PoC Alert!\n\n**{data['title']}**"
+            content = f"New PoC Alert!\n\n**{data['title']}**\n\n{data.get('content_body', '')}"
             
             logging.info(f"正在发送: {data['title']}")
             

@@ -21,7 +21,10 @@ class GitManager:
         old_commit = self.repo.head.commit.hexsha
         
         logging.info("正在拉取最新代码...")
-        origin.pull()
+        try:
+            origin.pull()
+        except Exception as e:
+            logging.warning(f"Git pull failed: {e}")
         
         # 获取拉取后的 HEAD
         new_commit = self.repo.head.commit.hexsha

@@ -59,6 +59,7 @@ jobs:
         if [[ -n $(git status -s data.db) ]]; then
           git add data.db
           git commit -m "update: bot state database [skip ci]"
+          git pull --rebase
           git push
         else
           echo "No changes to state."
