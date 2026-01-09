@@ -1,0 +1,65 @@
+name: Security PoC Monitor
+
+on:
+  schedule:
+    # 每一小时运行一次
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Scan Mode'
+        required: true
+        default: 'incremental'
+        type: choice
+        options:
+        - incremental
+        - all
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run Monitor Bot
+      env:
+        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+      run: |
+        # 获取输入的模式，默认为 incremental
+        MODE="${{ inputs.mode || 'incremental' }}"
+        
+        echo "Running in $MODE mode"
+        python main.py --mode $MODE
+
+    - name: Commit state changes
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        
+        # 检查 data.db 是否有变化
+        if [[ -n $(git status -s data.db) ]]; then
+          git add data.db
+          git commit -m "update: bot state database [skip ci]"
+          git push
+        else
+          echo "No changes to state."
+        fi

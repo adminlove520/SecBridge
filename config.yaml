@@ -1,0 +1,26 @@
+# 核心配置文件
+
+git:
+  # 远程仓库地址
+  repo_url: "https://github.com/adminlove520/Vulnerability-Wiki-PoC.git"
+  # 本地子模块路径
+  local_path: "Vulnerability-Wiki-PoC"
+  # 监听的分支
+  branch: "main"
+
+discord:
+  # 环境变量名称 (不要将 Token 直接写入此文件)
+  token_env: "DISCORD_TOKEN"
+  channel_id_env: "DISCORD_CHANNEL_ID"
+  # 发帖相关配置
+  max_retries: 5
+  retry_delay: 2.0 # 基础发送间隔(秒), 用于平滑流量
+  retry_backoff: 2.0 # 重试指数退避因子
+
+app:
+  # 状态文件，用于记录已处理的 commit 或文件 hash
+  state_file: "state.json"
+  # 检查间隔 (秒) - 仅在循环模式下有效
+  loop_interval: 300
+  # 日志级别
+  log_level: "INFO"
