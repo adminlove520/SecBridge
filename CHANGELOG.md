@@ -1,5 +1,23 @@
 # 📅 Changelog
 
+## 🔖 [3.0.0] - 2026-01-12
+
+### ✨ Added (新增)
+- **🌐 多源并行监控**: 支持同时订阅 `Vulnerability-Wiki-PoC`, `secLinkHub`, `Redteam` 等多个 Git 仓库。
+- **📁 论坛分区映射 (Partitioning)**: 
+    - 增加 `DISCORD_POC_CHANNEL_ID`, `DISCORD_REDTEAM_CHANNEL_ID`, `DISCORD_WIKI_CHANNEL_ID`。
+    - 情报根据来源自动投递到对应的论坛分区。
+- **🏷️ 高级标签引擎 Pro**:
+    - 支持 Markdown YAML Frontmatter 解析。
+    - 支持基于父目录结构的自动标签发现。
+    - 支持智能过滤导航类 README 文件。
+- **🚀 动态视觉增强**: 根据标签自动分发 `🛡️`, `⚔️`, `🔍`, `👨‍💻` 等分类前缀。
+
+### 🔧 Fixed (修复)
+- **⚙️ 环境隔离**: 重构 `.env.example` 模板，支持分区 ID 配置。
+- **🚦 稳定性优化**: 修复了 YAML 正则转义导致的配置读取异常。
+
+
 ## 🔖 [2.1.0] - 2026-01-09
 
 ### ✨ Added (新增)

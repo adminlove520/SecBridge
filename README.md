@@ -1,8 +1,10 @@
 # 🛡️ Discord Sec-Bridge (SecPoster)
 
+![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
+
 这是一个高度自动化的安全情报分发机器人，能够监控多个公开漏洞库、技术笔记仓库（如 `Vulnerability-Wiki-PoC`, `Redteam`, `secLinkHub`），并根据内容性质**自动分类**、**智能打标**，将情报精准投递到 Discord 论坛的不同分区。
 
-> **🚀 V3.0 更新 (Pro版)**: 
+> **🚀 V3.0.0 更新 (Pro版)**: 
 > - **多源并行监控**: 支持同时订阅无限个 Git 子模块仓库。
 > - **论坛分区模型**: 情报自动分发至不同子频道，解决内容堆叠问题。
 > - **高级标签引擎**: 支持 Frontmatter (YAML) 解析与正文关键词智能嗅探。
