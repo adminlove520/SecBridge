@@ -14,6 +14,7 @@ class GitManager:
     def pull_changes(self):
         """
         拉取最新更改并返回 (old_commit_sha, new_commit_sha)
+        自动处理本地未提交的更改（stash -> pull -> stash pop）
         """
         origin = self.repo.remotes.origin
         
@@ -21,10 +22,33 @@ class GitManager:
         old_commit = self.repo.head.commit.hexsha
         
         logging.info("正在拉取最新代码...")
+        
+        stashed = False
         try:
+            # 检查是否有未提交更改 (不包含未跟踪文件，因为 git pull 通常不会因为未跟踪文件失败，除非冲突)
+            if self.repo.is_dirty(untracked_files=False):
+                logging.info("检测到未提交的更改，正在暂存...")
+                self.repo.git.stash('save', "Auto-stash-before-update")
+                stashed = True
+            
             origin.pull()
+            
+            if stashed:
+                try:
+                    logging.info("正在还原暂存的更改...")
+                    self.repo.git.stash('pop')
+                except git.exc.GitCommandError as e:
+                    logging.warning(f"还原暂存失败 (可能存在冲突，请手动检查): {e}")
+                    
         except Exception as e:
             logging.warning(f"Git pull failed: {e}")
+            if stashed:
+                # 如果 pull 失败，尝试还原现场
+                try:
+                    logging.info("Git pull 失败，正在还原暂存...")
+                    self.repo.git.stash('pop')
+                except Exception as restore_error:
+                    logging.error(f"无法还原暂存: {restore_error}")
         
         # 获取拉取后的 HEAD
         new_commit = self.repo.head.commit.hexsha
