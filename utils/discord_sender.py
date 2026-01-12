@@ -92,13 +92,15 @@ class DiscordPoster(discord.Client):
         await self.ready_event.wait()
         
         try:
-            channel = self.get_channel(self.target_channel_id)
+            # 优先使用数据中指定的频道ID，实现分区发布
+            target_id = data.get('target_channel_id', self.target_channel_id)
+            channel = self.get_channel(target_id)
             if not channel:
-                channel = await self.fetch_channel(self.target_channel_id)
+                channel = await self.fetch_channel(target_id)
 
             if not isinstance(channel, discord.ForumChannel):
-                logging.error(f"目标频道 {self.target_channel_id} 类型错误")
-                return True # 当作成功处理以避免死循环重试（配置错误重试没用）
+                logging.error(f"目标频道 {target_id} 类型错误 (应为论坛频道)")
+                return True 
 
             # 标签匹配
             available_tags = channel.available_tags
@@ -113,9 +115,10 @@ class DiscordPoster(discord.Client):
                 if os.path.exists(file_path):
                     files.append(discord.File(file_path))
             
-            content = f"New PoC Alert!\n\n**{data['title']}**\n\n{data.get('content_body', '')}"
+            # 这里的标题前缀已经由 content_formatter 处理
+            content = data.get('content_body', '')
             
-            logging.info(f"正在发送: {data['title']}")
+            logging.info(f"正在发送到频道 {target_id}: {data['title']}")
             
             thread = await channel.create_thread(
                 name=data['title'],

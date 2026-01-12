@@ -1,12 +1,57 @@
 # 核心配置文件
 
-git:
-  # 远程仓库地址
-  repo_url: "https://github.com/adminlove520/Vulnerability-Wiki-PoC.git"
-  # 本地子模块路径
-  local_path: "Vulnerability-Wiki-PoC"
-  # 监听的分支
-  branch: "main"
+sources:
+  - name: "Vulnerability-Wiki-PoC"
+    repo_url: "https://github.com/adminlove520/Vulnerability-Wiki-PoC.git"
+    local_path: "Vulnerability-Wiki-PoC"
+    branch: "main"
+    type: "poc"
+    channel_id_env: "DISCORD_POC_CHANNEL_ID" # 使用专用频道
+    tag_rules:
+      use_year: true
+      extract_cve: true
+      keywords: ["RCE", "Bypass", "SQLi", "Upload", "Deserialize"]
+
+  - name: "secLinkHub"
+    repo_url: "https://github.com/adminlove520/secLinkHub.git"
+    local_path: "secLinkHub"
+    branch: "main"
+    type: "wiki"
+    channel_id_env: "DISCORD_WIKI_CHANNEL_ID" # 使用资源导航专用频道
+    tag_rules:
+      path_mapping:
+        "信息安全相关面试题": "面试与成长"
+        "常用工具": "常用工具"
+        "综合漏洞扫描工具汇总": "常用工具"
+        "子域名扫描工具汇总": "常用工具"
+        "端口扫描工具汇总": "常用工具"
+        "BurpSuite插件汇总": "常用工具"
+        "漏洞利用": "漏洞利用"
+        "中间件框架漏洞利用工具汇总": "漏洞利用"
+        "cms漏洞利用工具汇总": "漏洞利用"
+        "HW期间POC总结": "漏洞利用"
+        "内网渗透常用工具汇总": "红蓝对抗"
+        "红队常用命令总结": "红蓝对抗"
+        "红队前期打点工具汇总": "红蓝对抗"
+        "隧道代理工具汇总": "红蓝对抗"
+        "应急响应": "应急响应"
+        "流量设备检测规则相关汇总": "应急响应"
+        "学习资源": "学习资源"
+        "靶场汇总": "学习资源"
+        "CTF相关汇总": "学习资源"
+        "博客汇总": "学习资源"
+        "漏洞文库汇总": "学习资源"
+
+  - name: "Redteam"
+    repo_url: "https://github.com/adminlove520/Redteam.git"
+    local_path: "Redteam"
+    branch: "main"
+    type: "redteam"
+    channel_id_env: "DISCORD_REDTEAM_CHANNEL_ID" # 使用红队知识库专用频道
+    skip_patterns: ['README\.md$', 'SUMMARY\.md$'] # 跳过导航文件
+    tag_rules:
+      extract_frontmatter: true # 开启从 md 文档头提取标签
+      use_folder_as_tag: true # 自动将“1. 信息收集”等目录作为标签
 
 discord:
   # 环境变量名称 (不要将 Token 直接写入此文件)

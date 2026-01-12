@@ -1,3 +1,9 @@
 [submodule "Vulnerability-Wiki-PoC"]
 	path = Vulnerability-Wiki-PoC
 	url = https://github.com/adminlove520/Vulnerability-Wiki-PoC.git
+[submodule "secLinkHub"]
+	path = secLinkHub
+	url = https://github.com/adminlove520/secLinkHub.git
+[submodule "Redteam"]
+	path = Redteam
+	url = https://github.com/adminlove520/Redteam.git

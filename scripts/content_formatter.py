@@ -1,137 +1,146 @@
 import os
 import re
 
-def extract_info_from_path(file_path, repo_root):
+def extract_info_from_path(file_path, repo_root, source_config=None):
     """
-    根据文件路径提取标题、标签和相关附件
-    结构: 年份/漏洞名称文件夹/Markdown文件
-    例如: 2025/1Panel-CVE-2025-54424-远程命令执行/1Panel-CVE-2025-54424-远程命令执行.md
+    根据文件路径和仓库配置提取标题、标签和内容
+    """
+    source_config = source_config or {}
+    source_type = source_config.get('type', 'generic')
+    tag_rules = source_config.get('tag_rules', {})
     
-    返回:
-    {
-        "title": "2025-1Panel-CVE-2025-54424-远程命令执行",
-        "tags": ["2025"],
-        "content_path": file_path,
-        "attachments": [file_path, pdf_path]
-    }
-    """
-    # 获取相对于仓库根目录的路径
     rel_path = os.path.relpath(file_path, repo_root)
     parts = rel_path.split(os.sep)
     
-    # 默认值
-    year_tag = "Unknown"
-    title = os.path.basename(file_path).replace('.md', '')
-    vuln_dir_name = ""
-    
-    # 策略：从后往前找
-    # -1 是文件名
-    # -2 通常是漏洞目录名
-    # 如果存在月份层级 (2026/01/VulnDir/File.md)，则 -2 依然是 VulnDir
-    # 但如果只有 (2026/01/README.md)，则 -2 是 01，这时候应该忽略或作为特殊情况
-    
-    if len(parts) >= 2:
-        # 尝试提取年份（通常在第一层）
-        if re.match(r'^\d{4}$', parts[0]):
-            year_tag = parts[0]
-        
-        # 确定漏洞目录
-        # 忽略掉月份目录 (纯数字 01-12)
-        candidate_dir = parts[-2]
-        if re.match(r'^\d{1,2}$', candidate_dir):
-            # 如果倒数第二层是月份，说明可能是直接在月份下的文件，或者结构异常
-            # 这种情况下通常不是有效的 PoC 目录，或者我们往上找一层？
-            # 针对 PoC 结构：Year/Vuln/File.md (parts=3) 或 Year/Month/Vuln/File.md (parts=4)
-            # 如果 parts[-2] 是月份，那 parts[-1] 是文件。说明没有 VulnDir。
-            # 这种文件 (如 2026/02/README.md) 我们可能作为 General 处理，或跳过提取复杂标签
-            vuln_dir_name = title # Fallback
-        else:
-            vuln_dir_name = candidate_dir
+    final_title = os.path.basename(file_path).replace('.md', '')
+    tags = set()
+    skip = False
 
-    # 优化标题: 优先使用目录名 (因为文件名有时很随意)
-    if vuln_dir_name and title.lower() in ['readme', 'index', 'poc']:
-        final_title = vuln_dir_name
-    elif vuln_dir_name:
-        final_title = vuln_dir_name
-    else:
-        final_title = title
-
-    # 组合年份 (如果标题没包含)
-    if year_tag != "Unknown" and not final_title.startswith(year_tag):
-        final_title = f"{year_tag}-{final_title}"
-
-    # --- 提取漏洞复现/摘要内容 ---
-    content_body = "New PoC Alert!" # 默认值
+    # ---内容读取 ---
+    full_text = ""
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             full_text = f.read()
-            
-        # 策略 1: 匹配 "漏洞复现" / "POC" / "EXP" 章节
-        # 匹配 # 漏洞复现 或 **漏洞复现** (忽略大小写)
-        # (?:^|\n) 确保匹配行首
-        pattern = re.compile(r'(?:^|\n)(?:#+\s*|\*\*)(漏洞复现|POC|EXP|漏洞POC)(?:\*\*|:)?.*?\n(.*?)(?:(?=\n#)|$)', re.IGNORECASE | re.DOTALL)
-        match = pattern.search(full_text)
-        
-        extracted_text = ""
-        if match:
-            extracted_text = match.group(2).strip()
-        else:
-            # 策略 2: 如果没找到特定标题，尝试跳过前面可能的元数据/无关信息
-            # 简单的取前 500 字符作为预览
-            # 找第一个代码块之前的内容？或者直接截断
-            if len(full_text) > 200:
-                extracted_text = full_text[:500]
-            else:
-                extracted_text = full_text
-
-        if extracted_text:
-            # 限制长度，防止 Discord 报错 (Content limit 2000, 留点余量给标题)
-            max_len = 1800
-            if len(extracted_text) > max_len:
-                extracted_text = extracted_text[:max_len] + "\n... (详见附件)"
-            content_body = extracted_text
-            
     except Exception as e:
-        print(f"Error reading content for {file_path}: {e}")
+        full_text = f"无法读取内容: {str(e)}"
 
+    # --- 1. 过滤逻辑: 识别导航类 README ---
+    if final_title.lower() == 'readme':
+        # 启发式判断：链接密度
+        links = re.findall(r'\[.*?\]\(.*?\)', full_text)
+        text_no_links = re.sub(r'\[.*?\]\(.*?\)', '', full_text)
+        # 如果链接数量多且剩余文本较少，则认为是导航
+        if len(links) > 5 and len(text_no_links.strip()) < 300:
+            skip = True
 
-
-    # --- 简化标签提取: 直接使用目录名/标题 (用户建议) ---
-    tags = [year_tag] if year_tag != "Unknown" else []
+    # --- 2. 标签生成算法 ---
     
-    if vuln_dir_name:
-        # 1. 移除年份前缀 (避免重复)
-        clean_name = vuln_dir_name
-        if clean_name.startswith(f"{year_tag}-"):
-             clean_name = clean_name[len(year_tag)+1:]
-        elif clean_name.startswith(year_tag):
-             clean_name = clean_name[len(year_tag):]
-        
-        # 2. 直接作为标签 (截断以适配 Discord 20字符限制)
-        # 优先去空格
-        tag_candidate = clean_name.strip()
-        if tag_candidate:
-            # 如果太长，取前20个字符
-            if len(tag_candidate) > 20:
-                tag_candidate = tag_candidate[:20]
-            
-            # [USER REQUEST] 暂时禁用由于截断带来的 Bug (e.g. "WordPress S")
-            # 避免与 Year 重复
-            # if tag_candidate != year_tag:
-            #     tags.append(tag_candidate)
-                
+    # A. 路径匹配逻辑
+    path_mapping = tag_rules.get('path_mapping', {})
+    for path_part in parts:
+        if path_part in path_mapping:
+            tags.add(path_mapping[path_part])
+    
+    # B. Frontmatter 提取 (如 tag: xxx)
+    if tag_rules.get('extract_frontmatter'):
+        # 兼容 --- \n tag: xxx \n ---
+        fm_match = re.search(r'^---\s*\n(.*?)\n---\s*\n', full_text, re.DOTALL)
+        if fm_match:
+            fm_content = fm_match.group(1)
+            # 简单正则匹配 tag/tags
+            tag_val = re.search(r'^tags?:\s*(.*)$', fm_content, re.MULTILINE | re.IGNORECASE)
+            if tag_val:
+                t_str = tag_val.group(1).strip()
+                # 处理 [tag1, tag2] 格式或单字符串
+                if t_str.startswith('[') and t_str.endswith(']'):
+                    t_list = [t.strip().strip('"').strip("'") for t in t_str[1:-1].split(',')]
+                    tags.update(t_list)
+                else:
+                    tags.add(t_str)
+
+    # C. 自动目录标签 (Redteam 风格: "1. 信息收集")
+    if tag_rules.get('use_folder_as_tag') and len(parts) >= 2:
+        folder_tag = parts[-2]
+        # 去掉数字前缀（如 1. ）
+        folder_tag = re.sub(r'^\d+[\.\s\-]+', '', folder_tag)
+        if folder_tag and folder_tag.lower() not in ['source', 'poc', 'readme']:
+            tags.add(folder_tag)
+
+    # D. PoC 特定规则
+    if source_type == 'poc':
+        if len(parts) >= 1 and re.match(r'^\d{4}$', parts[0]):
+            tags.add(parts[0])
+        vuln_dir_name = parts[-2] if len(parts) >= 2 else ""
+        if vuln_dir_name and final_title.lower() in ['readme', 'index', 'poc']:
+            final_title = vuln_dir_name
+        year = parts[0] if len(parts) >= 1 and parts[0].isdigit() else ""
+        if year and not final_title.startswith(year):
+            final_title = f"{year}-{final_title}"
+
+    # E. 正则提取 (如 CVE)
+    if tag_rules.get('extract_cve'):
+        cve_match = re.search(r'CVE-\d{4}-\d{4,}', final_title, re.IGNORECASE)
+        if cve_match:
+            tags.add("CVE")
+
+    # --- 3. 内容提取与清洗 ---
+    content_body = ""
+    # 移除 YAML Frontmatter
+    clean_text = re.sub(r'^---\s+.*?\s+---\s+', '', full_text, flags=re.DOTALL).strip()
+    
+    if source_type == 'poc':
+        pattern = re.compile(r'(?:^|\n)(?:#+\s*|\*\*)(漏洞复现|POC|EXP|漏洞POC)(?:\*\*|:)?.*?\n(.*?)(?:(?=\n#)|$)', re.IGNORECASE | re.DOTALL)
+        match = pattern.search(clean_text)
+        if match:
+            content_body = match.group(2).strip()
+    
+    if not content_body:
+        # 取首个非标题段落
+        paragraphs = [p.strip() for p in clean_text.split('\n\n') if p.strip() and not p.strip().startswith('#')]
+        if paragraphs:
+            content_body = paragraphs[0]
+            if len(content_body) < 100 and len(paragraphs) > 1:
+                content_body += "\n\n" + paragraphs[1]
+
+    # 4. 关键词嗅探 (排除 Frontmatter)
+    keywords_to_check = tag_rules.get('keywords', ["RCE", "免杀", "权限维持", "内网渗透", "应急响应", "溯源"])
+    for kw in keywords_to_check:
+        if kw.lower() in clean_text.lower():
+            if source_type == 'wiki' and kw == "面试":
+                tags.add("面试与成长")
+            else:
+                tags.add(kw)
+
+    # 智能截断
+    max_len = 1500
+    if len(content_body) > max_len:
+        content_body = content_body[:max_len] + "\n\n> ...... (提示: 内容已截断，请查看附件 `Markdown` 获取完整细节)"
+    
+    # 动态前缀
+    prefix = "💡"
+    tags_str = "".join(list(tags))
+    if source_type == 'poc': prefix = "🛡️ [PoC]"
+    elif "面试" in tags_str: prefix = "👨‍💻 [面试]"
+    elif "工具" in tags_str: prefix = "🛠️ [工具]"
+    elif "红蓝对抗" in tags_str or "红队" in tags_str: prefix = "⚔️ [红蓝]"
+    elif "提权" in tags_str: prefix = "🚀 [提权]"
+    elif "信息收集" in tags_str: prefix = "🔍 [信息收集]"
+    
+    formatted_content = f"{prefix}\n\n{content_body}"
+
+    # 附件处理
+    attachments = [file_path]
     dir_path = os.path.dirname(file_path)
-    attachments = [file_path] # Markdown 本身
-    
     if os.path.exists(dir_path):
         for f in os.listdir(dir_path):
-            if f.lower().endswith('.pdf'):
+            if f.lower().endswith(('.pdf', '.docx', '.doc')) and os.path.join(dir_path, f) != file_path:
                 attachments.append(os.path.join(dir_path, f))
-    
+
     return {
         "title": final_title,
-        "tags": tags,
+        "tags": list(tags),
         "content_path": file_path,
-        "content_body": content_body,
-        "attachments": attachments
+        "content_body": formatted_content,
+        "attachments": attachments,
+        "skip": skip
     }

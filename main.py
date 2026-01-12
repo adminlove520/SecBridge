@@ -3,10 +3,12 @@ import os
 import logging
 import yaml
 import argparse
+import re
 import sys
 import signal
 import json
 from typing import Optional
+from dotenv import load_dotenv
 
 from utils.git_manager import GitManager
 from utils.discord_sender import DiscordPoster
@@ -39,18 +41,6 @@ async def main():
     load_dotenv()
     config = load_config()
 
-    repo_path = os.path.abspath(config['git']['local_path'])
-    
-    if not os.path.exists(os.path.join(repo_path, '.git')):
-        logging.error(f"子模块路径 {repo_path} 不存在或未初始化。请先运行 'git submodule update --init --recursive'")
-        return
-    
-    # 额外检查：Vulnerability-Wiki-PoC 是否为空（只有.git）
-    if not any(f for f in os.listdir(repo_path) if f != '.git'):
-        logging.error(f"子模块 {repo_path} 为空！请确保执行了 git submodule update")
-        return
-
-    git_manager = GitManager(repo_path)
     db_manager = DBManager()
     
     token = os.getenv(config['discord']['token_env'])
@@ -63,13 +53,16 @@ async def main():
 
     # 回调函数：当 Discord 发送成功后调用
     def on_post_success(data):
-        rel_path = os.path.relpath(data['content_path'], repo_path)
-        db_manager.mark_file_processed(rel_path)
-        reporter.record_success()
-        logging.info(f"✨ 数据库已更新: {rel_path} 标记为已处理")
+        db_path = data.get('db_rel_path')
+        if db_path:
+            db_manager.mark_file_processed(db_path)
+            reporter.record_success()
+            logging.info(f"✨ 数据库已更新: {db_path} 标记为已处理")
+        else:
+            logging.error("回调失败: 数据中缺少 db_rel_path")
 
     poster = None
-    reporter = Reporter(repo_path, db_manager)
+    reporter = Reporter(".", db_manager)
     
     if not args.dry_run:
         # 传入回调函数
@@ -93,84 +86,121 @@ async def main():
         pass
 
     try:
+        sources = config.get('sources', [])
+        if not sources:
+            logging.error("配置文件中未定义任何源 (sources)")
+            return
+
         while True:
-            files_to_process = []
-            
-            if args.mode == 'all':
-                logging.info("开始全量扫描模式...")
-                all_md_files = git_manager.get_all_markdown_files()
-                logging.info(f"扫描到 {len(all_md_files)} 个 Markdown 文件")
+            for source in sources:
+                source_name = source['name']
+                repo_path = os.path.abspath(source['local_path'])
                 
-                new_files_count = 0
-                for file_path in all_md_files:
-                    rel_path = os.path.relpath(file_path, repo_path)
-                    if not db_manager.is_file_processed(rel_path):
-                        files_to_process.append(file_path)
-                        new_files_count += 1
+                logging.info(f"--- 处理源: {source_name} ---")
+                
+                if not os.path.exists(os.path.join(repo_path, '.git')):
+                    logging.warning(f"跳过 {source_name}: 路径 {repo_path} 不存在或未初始化")
+                    continue
+                
+                # 获取该源对应的 Discord 频道 ID
+                source_channel_id = os.getenv(source.get('channel_id_env', ''), channel_id) # 默认使用全局 channel_id
+                if not source_channel_id:
+                    if args.dry_run:
+                        source_channel_id = "123456789" # Dry run 允许使用虚拟 ID
                     else:
-                        reporter.record_skip()
+                        logging.error(f"源 {source_name} 未定义有效的 DISCORD_CHANNEL_ID")
+                        continue
+
+                git_manager = GitManager(repo_path)
+                files_to_process = []
                 
-                logging.info(f"其中 {new_files_count} 个为新文件(未发送过)")
+                # 预定义跳过正则
+                skip_patterns = [re.compile(p) for p in source.get('skip_patterns', [])]
 
-            else: # incremental
-                logging.info("开始增量检测模式...")
-                old_commit = db_manager.get_state('last_commit')
-                current_local_commit = git_manager.repo.head.commit.hexsha
-
-                if not old_commit:
-                    logging.info("首次运行增量模式，无历史 Commit 记录。")
-                    logging.info("将当前 Commit 标记为基准，不发送历史数据。")
-                    db_manager.set_state('last_commit', current_local_commit)
-                else:
-                    prev_sha, new_sha = git_manager.pull_changes()
-                    if prev_sha != new_sha:
-                        logging.info(f"检测到更新: {prev_sha[:7]} -> {new_sha[:7]}")
-                        changed = git_manager.get_changed_files(prev_sha, new_sha)
-                        for f in changed:
-                            rel_path = os.path.relpath(f, repo_path)
-                            if not db_manager.is_file_processed(rel_path):
-                                files_to_process.append(f)
-                            else:
-                                reporter.record_skip()
+                if args.mode == 'all':
+                    logging.info(f"[{source_name}] 开始全量扫描...")
+                    all_md_files = git_manager.get_all_markdown_files()
+                    for file_path in all_md_files:
+                        rel_path = os.path.relpath(file_path, repo_path)
+                        db_rel_path = f"{source_name}/{rel_path}"
                         
-                        db_manager.set_state('last_commit', new_sha)
-                    else:
-                        logging.info("仓库无新 Commit。")
+                        # 1. 配置级跳过
+                        if any(p.search(rel_path) for p in skip_patterns):
+                            logging.debug(f"跳过匹配 skip_patterns 的文件: {rel_path}")
+                            continue
 
-            # 处理文件队列
-            for file_path in files_to_process:
-                info = extract_info_from_path(file_path, repo_path)
-                
-                # 为了日志美观，尝试只显示相对路径的前半部分或标题
-                display_path = os.path.relpath(file_path, repo_path)
-                logging.info(f"准备入队: {info['title']} (File: {display_path})")
-                
-                if args.dry_run:
-                    # Dry Run 时也只打印相对路径，避免 D:\... 造成的困扰
-                    log_info = info.copy()
-                    log_info['content_path'] = os.path.relpath(info['content_path'], repo_path)
-                    log_info['attachments'] = [os.path.relpath(fp, repo_path) for fp in info['attachments']]
-                    logging.info(f"[DRY RUN] 发送内容: {json.dumps(log_info, ensure_ascii=False)}")
-                    reporter.record_success() # Dry run counts as success
+                        if not db_manager.is_file_processed(db_rel_path):
+                            files_to_process.append(file_path)
+                        else:
+                            reporter.record_skip()
                 else:
-                    await poster.add_to_queue(info)
+                    logging.info(f"[{source_name}] 开始增量检测...")
+                    state_key = f"last_commit_{source_name}"
+                    old_commit = db_manager.get_state(state_key)
+                    current_local_commit = git_manager.repo.head.commit.hexsha
+
+                    if not old_commit:
+                        logging.info(f"[{source_name}] 首次运行，标记当前 Commit 为基准")
+                        db_manager.set_state(state_key, current_local_commit)
+                    else:
+                        prev_sha, new_sha = git_manager.pull_changes()
+                        if prev_sha != new_sha:
+                            logging.info(f"[{source_name}] 检测到更新: {prev_sha[:7]} -> {new_sha[:7]}")
+                            changed = git_manager.get_changed_files(prev_sha, new_sha)
+                            for f in changed:
+                                rel_path = os.path.relpath(f, repo_path)
+                                db_rel_path = f"{source_name}/{rel_path}"
+                                
+                                # 1. 配置级跳过
+                                if any(p.search(rel_path) for p in skip_patterns):
+                                    continue
+
+                                if not db_manager.is_file_processed(db_rel_path):
+                                    files_to_process.append(f)
+                                else:
+                                    reporter.record_skip()
+                            db_manager.set_state(state_key, new_sha)
+                        else:
+                            logging.info(f"[{source_name}] 无新 Commit")
+
+                # 处理文件队列
+                for file_path in files_to_process:
+                    db_rel_path = f"{source_name}/{os.path.relpath(file_path, repo_path)}"
+                    
+                    # 提取信息，包含逻辑校验
+                    info = extract_info_from_path(file_path, repo_path, source)
+                    
+                    # 2. 逻辑级跳过 (如导航文档)
+                    if info.get('skip'):
+                        logging.info(f"⏭️ 自动跳过导航类文档: {info['title']}")
+                        # 标记为已处理，避免下次扫描重复
+                        db_manager.mark_file_processed(db_rel_path)
+                        continue
+
+                    info['db_rel_path'] = db_rel_path
+                    info['target_channel_id'] = int(source_channel_id)
+                    
+                    logging.info(f"准备入队: {info['title']} (Channel: {source_channel_id}, Tags: {info['tags']})")
+                    
+                    if args.dry_run:
+                        logging.info(f"[DRY RUN] 发送 Preview -> {info['title']} 标签: {info['tags']}")
+                        reporter.record_success()
+                    else:
+                        await poster.add_to_queue(info)
 
             if not args.loop:
                 if poster and not args.dry_run:
-                    logging.info("等待队列任务完成...")
+                    logging.info("等待所有队列任务完成...")
                     await poster.queue.join()
                 
-                # --- 生成报告 (在循环结束后，或单次运行结束前) ---
                 try:
-                    reporter.scan_orphans()
                     reporter.generate_report()
                 except Exception as e:
                     logging.error(f"生成报告失败: {e}")
-                    
                 break
             
             wait_time = config.get('app', {}).get('loop_interval', 300)
-            logging.info(f"等待 {wait_time} 秒后进行下一次检查...")
+            logging.info(f"等待 {wait_time} 秒后进行下一次全源检查...")
             await asyncio.sleep(wait_time)
 
     except KeyboardInterrupt:
