@@ -9,7 +9,8 @@ class DiscordPoster(discord.Client):
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.token = token
-        self.target_channel_id = int(channel_id)
+        # 允许 channel_id 为 None，因为实际发送时会使用每个帖子的 target_channel_id
+        self.target_channel_id = int(channel_id) if channel_id is not None else None
         self.queue = asyncio.Queue()
         self.config = config
         self.is_processing = False
@@ -94,6 +95,12 @@ class DiscordPoster(discord.Client):
         try:
             # 优先使用数据中指定的频道ID，实现分区发布
             target_id = data.get('target_channel_id', self.target_channel_id)
+            
+            # 检查 target_id 是否有效
+            if target_id is None:
+                logging.error("发送失败: 缺少有效的频道ID")
+                return True # 视为完成（失败的完成），避免卡死
+            
             channel = self.get_channel(target_id)
             if not channel:
                 channel = await self.fetch_channel(target_id)
