@@ -47,7 +47,6 @@ jobs:
     - name: Run Monitor Bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-        DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         DISCORD_POC_CHANNEL_ID: ${{ secrets.DISCORD_POC_CHANNEL_ID }}
         DISCORD_WIKI_CHANNEL_ID: ${{ secrets.DISCORD_WIKI_CHANNEL_ID }}
         DISCORD_REDTEAM_CHANNEL_ID: ${{ secrets.DISCORD_REDTEAM_CHANNEL_ID }}
