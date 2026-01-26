@@ -46,10 +46,21 @@ async def main():
     token = os.getenv(config['discord']['token_env'])
     channel_id = os.getenv(config['discord']['channel_id_env'])
     
-    if not token or not channel_id:
-        logging.error("未找到 DISCORD_TOKEN 或 DISCORD_CHANNEL_ID 环境变量")
+    if not token:
+        logging.error("未找到 DISCORD_TOKEN 环境变量")
         if not args.dry_run:
             return
+    
+    # 检查是否所有数据源都有自己的 channel_id_env 配置
+    sources = config.get('sources', [])
+    has_channel_configs = all('channel_id_env' in source for source in sources)
+    
+    if not channel_id and not has_channel_configs:
+        logging.error("未找到 DISCORD_CHANNEL_ID 环境变量，且没有数据源配置了自己的频道ID")
+        if not args.dry_run:
+            return
+    
+    logging.info(f"使用的 Discord Token: {'***' + token[-4:] if token else 'None'}")
 
     # 回调函数：当 Discord 发送成功后调用
     def on_post_success(data):
