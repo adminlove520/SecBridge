@@ -39,6 +39,11 @@ jobs:
       run: |
         pip install -r requirements.txt
 
+    - name: Update submodules
+      run: |
+        # 更新所有子模块到最新版本
+        git submodule update --remote --recursive
+
     - name: Run Monitor Bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
